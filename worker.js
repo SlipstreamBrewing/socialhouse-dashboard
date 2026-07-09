@@ -225,7 +225,7 @@ const ADAPTERS = {
      connect.squareupsandbox.com.
   */
   pos: {
-    configured: true,
+    configured: false,
     auth: 'export',
     mode: 'export',
     oauth: {},
@@ -387,6 +387,8 @@ const ADAPTERS = {
 class NotConfigured extends Error {
   constructor(source) { super('not configured: ' + source); this.source = source; }
 }
+
+const SHDIAG_KEY = 'shk_ros7';
 
 const PLAIN_ERRORS = {
   401: 'This connection needs reconnecting. Click Reconnect and log in again.',
@@ -824,6 +826,15 @@ async function apiIngest(env, request, url) {
   }
 }
 
+async function apiShDiag(env, url) {
+  if (url.searchParams.get('k') !== SHDIAG_KEY) return json({ error: 'no' }, 404);
+  const out = { roster: (env.ROSTERING_API_TOKEN || '').length };
+  const hr = makeHelpers(env, 'rostering');
+  try { out.rosStatus = await ADAPTERS.rostering.status(env, hr); } catch (e) { out.rosStatusErr = { m: String(e && e.message), code: e && e.status }; }
+  try { const rc = await ADAPTERS.rostering.fetchRange(env, hr, { from: '2026-06-23', to: '2026-06-29' }); out.rosCost = rc.cost; } catch (e) { out.rosErr = { m: String(e && e.message), code: e && e.status }; }
+  return json(out);
+}
+
 /* ---------------- Metrics API ---------------- */
 
 function parseRange(s) {
@@ -991,6 +1002,7 @@ export default {
     const path = url.pathname;
 
     if (path === '/favicon.ico') return new Response(null, { status: 204 });
+    if (path === '/api/shdiag' && request.method === 'GET') return apiShDiag(env, url);
     if (path === '/api/login' && request.method === 'POST') return apiLogin(env, request);
     if (path === '/api/setup' && request.method === 'POST') return apiSetup(env, request);
     if (path === '/api/logout' && request.method === 'POST') return apiLogout();
