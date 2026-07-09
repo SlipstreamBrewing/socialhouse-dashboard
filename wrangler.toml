@@ -14,11 +14,6 @@ compatibility_date = "2026-06-01"
 # secrets - which is what repeatedly wiped the Xero/BePoz/Tanda credentials.
 keep_vars = true
 
-# Lock this dashboard to the Social House Xero organisation (the shared Xero app
-# can see more than one org; this selects the right one).
-[vars]
-ACCOUNTING_TENANT = "Social House"
-
 # The dashboard page is bundled into the Worker as text.
 rules = [
   { type = "Text", globs = ["**/*.html"], fallthrough = true }
@@ -73,4 +68,7 @@ id = "50eed51c1fb048d4b5f23660f8db3229"
 #                          # own export runs
 # ----------------------------------------------------------------------------
 # redeploy 1783572964
+[vars]
+ACCOUNTING_TENANT = "Social House"
+
 # EOF wrangler.toml
