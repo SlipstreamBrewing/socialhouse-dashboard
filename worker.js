@@ -398,8 +398,6 @@ class NotConfigured extends Error {
   constructor(source) { super('not configured: ' + source); this.source = source; }
 }
 
-const SHDIAG_KEY = 'shk_ing2';
-
 const PLAIN_ERRORS = {
   401: 'This connection needs reconnecting. Click Reconnect and log in again.',
   403: 'This connection is missing a permission it needs. Your AI will sort out the access.',
@@ -813,8 +811,9 @@ async function monthlyIngested(env, source, fromMonth, toMonth) {
 async function apiIngest(env, request, url) {
   const source = url.searchParams.get('source');
   if (!['accounting', 'pos', 'rostering'].includes(source)) return json({ error: 'unknown source' }, 400);
-  const auth = request.headers.get('Authorization') || '';
-  if (!env.INGEST_TOKEN || auth !== 'Bearer ' + env.INGEST_TOKEN) {
+  const auth = (request.headers.get('Authorization') || '').trim();
+  const expected = (env.INGEST_TOKEN || '').trim();
+  if (!expected || auth !== 'Bearer ' + expected) {
     return json({ error: 'not authorised', plain: 'That upload code didn\u2019t match. Check it with your AI and try again.' }, 401);
   }
   const adapter = ADAPTERS[source];
@@ -834,12 +833,6 @@ async function apiIngest(env, request, url) {
   } catch (e) {
     return json({ error: 'parse failed', plain: 'That file couldn\u2019t be read. Check it\u2019s the right report, or show it to your AI.' }, 422);
   }
-}
-
-async function apiShDiag(env, url) {
-  if (url.searchParams.get('k') !== SHDIAG_KEY) return json({ error: 'no' }, 404);
-  const t = env.INGEST_TOKEN || '';
-  return json({ ingestLen: t.length, ingestHead: t.slice(0, 6), ingestTail: t.slice(-4), posConfigured: !!(ADAPTERS.pos && ADAPTERS.pos.configured), posIngest: typeof ADAPTERS.pos.parseExport === 'function' });
 }
 
 /* ---------------- Metrics API ---------------- */
@@ -1009,7 +1002,6 @@ export default {
     const path = url.pathname;
 
     if (path === '/favicon.ico') return new Response(null, { status: 204 });
-    if (path === '/api/shdiag' && request.method === 'GET') return apiShDiag(env, url);
     if (path === '/api/login' && request.method === 'POST') return apiLogin(env, request);
     if (path === '/api/setup' && request.method === 'POST') return apiSetup(env, request);
     if (path === '/api/logout' && request.method === 'POST') return apiLogout();
