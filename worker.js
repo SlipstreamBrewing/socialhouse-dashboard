@@ -828,10 +828,12 @@ async function apiIngest(env, request, url) {
 
 async function apiShDiag(env, url) {
   if (url.searchParams.get('k') !== SHDIAG_KEY) return json({ error: 'no' }, 404);
-  const out = { roster: (env.ROSTERING_API_TOKEN || '').length };
-  const hr = makeHelpers(env, 'rostering');
-  try { out.rosStatus = await ADAPTERS.rostering.status(env, hr); } catch (e) { out.rosStatusErr = { m: String(e && e.message), code: e && e.status }; }
-  try { const rc = await ADAPTERS.rostering.fetchRange(env, hr, { from: '2026-06-23', to: '2026-06-29' }); out.rosCost = rc.cost; } catch (e) { out.rosErr = { m: String(e && e.message), code: e && e.status }; }
+  const token = env.ROSTERING_API_TOKEN;
+  const base = 'https://my.tanda.co/api/v2';
+  const out = { roster: (token || '').length };
+  const g = async (p) => { const r = await fetch(base + p, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } }); if (!r.ok) return { err: r.status }; return r.json(); };
+  try { const loc = await g('/locations'); out.locations = Array.isArray(loc) ? loc.map((l) => ({ id: l.id, name: l.name })) : loc; } catch (e) { out.locErr = String(e && e.message); }
+  try { const dep = await g('/departments'); out.departments = Array.isArray(dep) ? dep.map((d) => ({ id: d.id, name: d.name, location_id: d.location_id })) : dep; } catch (e) { out.depErr = String(e && e.message); }
   return json(out);
 }
 
