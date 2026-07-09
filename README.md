@@ -137,3 +137,5 @@ against the docs at build time.
 - "Same period last year" uses weekday-aligned comparison for weeks (364
   days) and calendar alignment for months and financial years - the heading
   on each card states what it compares against.
+
+# build trigger 1783575556
