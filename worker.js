@@ -322,37 +322,52 @@ const ADAPTERS = {
     oauth: {},
     _base: 'https://my.tanda.co/api/v2',
     _tokenSecret: 'ROSTERING_API_TOKEN',
+    _deptCache: null,
 
-    _addDays(d, n) {
-      const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n);
-      return t.toISOString().slice(0, 10);
-    },
-    _daysBetween(a, b) {
-      return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
-    },
-    async _rosterOn(env, date) {
+    _addDays(d, n) { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); },
+    _daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000); },
+
+    async _tanda(env, path) {
       const token = env[this._tokenSecret];
-      const res = await fetch(this._base + '/rosters/on/' + date + '?show_costs=true', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+      const res = await fetch(this._base + path, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
       if (res.status === 204) return null;
       if (!res.ok) { const e = new Error('HTTP ' + res.status); e.status = res.status; throw e; }
       return res.json();
     },
 
+    /* department ids for the configured location (ROSTERING_LOCATION name match).
+       null => no filter (sum all). Throws if a location is configured but unresolved. */
+    async _deptIds(env) {
+      const want = (env.ROSTERING_LOCATION || '').trim().toLowerCase();
+      if (!want) return null;
+      if (this._deptCache) return this._deptCache;
+      const locs = await this._tanda(env, '/locations');
+      const locIds = new Set((Array.isArray(locs) ? locs : []).filter((l) => (l.name || '').toLowerCase().includes(want)).map((l) => l.id));
+      if (!locIds.size) { const e = new Error('location not found'); e.status = 404; throw e; }
+      const deps = await this._tanda(env, '/departments');
+      const set = new Set((Array.isArray(deps) ? deps : []).filter((d) => locIds.has(d.location_id)).map((d) => d.id));
+      this._deptCache = set;
+      return set;
+    },
+
+    async _rosterOn(env, date) { return this._tanda(env, '/rosters/on/' + date + '?show_costs=true'); },
+
     async status(env, h) {
       const token = env[this._tokenSecret];
       if (!token) return { connected: false };
       let org = null;
-      try {
-        const res = await fetch(this._base + '/organisations', { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
-        if (res.ok) { const o = await res.json(); if (Array.isArray(o) && o.length) org = o[0].name || null; }
-      } catch (e) { /* org label is best-effort */ }
-      return { connected: true, org: org || 'Tanda', sandbox: false, lastSync: null };
+      try { const o = await this._tanda(env, '/organisations'); if (Array.isArray(o) && o.length) org = o[0].name || null; } catch (e) {}
+      const label = env.ROSTERING_LOCATION ? ('Tanda – ' + env.ROSTERING_LOCATION) : (org || 'Tanda');
+      return { connected: true, org: label, sandbox: false, lastSync: null };
     },
 
     async fetchRange(env, h, q) {
       const token = env[this._tokenSecret];
       if (!token) { const e = new Error('no token'); e.status = 401; throw e; }
       if (this._daysBetween(q.from, q.to) > 45) return { cost: null };
+      let deptSet = null;
+      try { deptSet = await this._deptIds(env); }
+      catch (e) { if (env.ROSTERING_LOCATION) return { cost: null }; }
       let cost = 0; const seen = new Set();
       let cursor = q.from; let guard = 0; let any = false;
       while (cursor <= q.to && guard < 12) {
@@ -366,6 +381,7 @@ const ADAPTERS = {
           for (const day of (roster.schedules || [])) {
             if (day && day.date >= q.from && day.date <= q.to) {
               for (const sh of (day.schedules || [])) {
+                if (deptSet && !deptSet.has(sh.department_id)) continue;
                 if (typeof sh.cost === 'number' && isFinite(sh.cost)) cost += sh.cost;
               }
             }
@@ -828,12 +844,10 @@ async function apiIngest(env, request, url) {
 
 async function apiShDiag(env, url) {
   if (url.searchParams.get('k') !== SHDIAG_KEY) return json({ error: 'no' }, 404);
-  const token = env.ROSTERING_API_TOKEN;
-  const base = 'https://my.tanda.co/api/v2';
-  const out = { roster: (token || '').length };
-  const g = async (p) => { const r = await fetch(base + p, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } }); if (!r.ok) return { err: r.status }; return r.json(); };
-  try { const loc = await g('/locations'); out.locations = Array.isArray(loc) ? loc.map((l) => ({ id: l.id, name: l.name })) : loc; } catch (e) { out.locErr = String(e && e.message); }
-  try { const dep = await g('/departments'); out.departments = Array.isArray(dep) ? dep.map((d) => ({ id: d.id, name: d.name, location_id: d.location_id })) : dep; } catch (e) { out.depErr = String(e && e.message); }
+  const out = { roster: (env.ROSTERING_API_TOKEN || '').length, loc: env.ROSTERING_LOCATION || null };
+  const hr = makeHelpers(env, 'rostering');
+  try { const set = await ADAPTERS.rostering._deptIds(env); out.deptCount = set ? set.size : null; } catch (e) { out.deptErr = { m: String(e && e.message), code: e && e.status }; }
+  try { const rc = await ADAPTERS.rostering.fetchRange(env, hr, { from: '2026-06-23', to: '2026-06-29' }); out.rosCost = rc.cost; } catch (e) { out.rosErr = { m: String(e && e.message), code: e && e.status }; }
   return json(out);
 }
 

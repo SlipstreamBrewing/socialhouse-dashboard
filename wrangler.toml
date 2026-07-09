@@ -70,5 +70,6 @@ id = "50eed51c1fb048d4b5f23660f8db3229"
 # redeploy 1783572964
 [vars]
 ACCOUNTING_TENANT = "Slipstream Hospitality"
+ROSTERING_LOCATION = "Social House"
 
 # EOF wrangler.toml
