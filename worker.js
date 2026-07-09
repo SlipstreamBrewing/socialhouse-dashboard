@@ -388,8 +388,6 @@ class NotConfigured extends Error {
   constructor(source) { super('not configured: ' + source); this.source = source; }
 }
 
-const SHDIAG_KEY = 'shk_5a2b8c';
-
 const PLAIN_ERRORS = {
   401: 'This connection needs reconnecting. Click Reconnect and log in again.',
   403: 'This connection is missing a permission it needs. Your AI will sort out the access.',
@@ -826,23 +824,6 @@ async function apiIngest(env, request, url) {
   }
 }
 
-async function apiShDiag(env, url) {
-  if (url.searchParams.get('k') !== SHDIAG_KEY) return json({ error: 'no' }, 404);
-  const out = {
-    accId: (env.ACCOUNTING_CLIENT_ID || '').length,
-    accSecret: (env.ACCOUNTING_CLIENT_SECRET || '').length,
-    tenantVar: env.ACCOUNTING_TENANT || null,
-    hasTokens: false, tenants: null
-  };
-  try { const t = await getTokens(env, 'accounting'); out.hasTokens = !!(t && t.access_token); } catch (e) {}
-  try {
-    const h = makeHelpers(env, 'accounting');
-    const conns = await h.fetchJson('https://api.xero.com/connections', { headers: { Accept: 'application/json' } });
-    out.tenants = (Array.isArray(conns) ? conns : []).map((c) => c.tenantName);
-  } catch (e) { out.connErr = { m: String(e && e.message), code: e && e.status }; }
-  return json(out);
-}
-
 /* ---------------- Metrics API ---------------- */
 
 function parseRange(s) {
@@ -1010,7 +991,6 @@ export default {
     const path = url.pathname;
 
     if (path === '/favicon.ico') return new Response(null, { status: 204 });
-    if (path === '/api/shdiag' && request.method === 'GET') return apiShDiag(env, url);
     if (path === '/api/login' && request.method === 'POST') return apiLogin(env, request);
     if (path === '/api/setup' && request.method === 'POST') return apiSetup(env, request);
     if (path === '/api/logout' && request.method === 'POST') return apiLogout();
