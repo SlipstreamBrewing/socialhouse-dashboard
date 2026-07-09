@@ -225,12 +225,12 @@ const ADAPTERS = {
      connect.squareupsandbox.com.
   */
   pos: {
-    configured: false,
+    configured: true,
     auth: 'export',
     mode: 'export',
     oauth: {},
 
-    _completed: ['CASH SALE', 'TABLE CLOSED', 'BISTRO CLOSED', 'PICKUP CLOSED', 'MONTHLY ACCOUNT'],
+    _tenders: ['CASH', 'VISA', 'MASTERCARD', 'EFTPOS', 'AMEX'],
     _months: { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' },
 
     _splitCSV(line) {
@@ -245,17 +245,19 @@ const ADAPTERS = {
 
     _iso(s) {
       s = String(s || '').trim();
-      let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+      let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);          // YYYY-MM-DD
       if (m) return m[1] + '-' + m[2] + '-' + m[3];
+      m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);        // DD/MM/YYYY (Idealpos)
+      if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
       m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})/.exec(s);
-      if (m) { const mo = this._months[m[2].toLowerCase()]; if (mo) return m[3] + '-' + mo + '-' + String(m[1]).padStart(2, '0'); }
+      if (m) { const mo = this._months[m[2].toLowerCase()]; if (mo) return m[3] + '-' + mo + '-' + m[1].padStart(2, '0'); }
       return null;
     },
 
-    /* Accepts either a compact summary (columns: date,count) or a BePoz
-       "Transaction List" line-item export. Counts one completed sale per
-       Trans. ID (Cash Sale + the Closed types + Monthly Account), excluding
-       refunds (negative Transaction Total) and all open/held/operational rows. */
+    /* Accepts a compact summary (date,count) OR an Idealpos "Journal History"
+       export (16 cols, no header). Counts one completed PAID sale per
+       transaction (col 8), i.e. a bill with a cash/card/gift tender, excluding
+       no-sales, floats/cash-decs, voided sales and refunds. */
     async parseExport(env, h, raw) {
       const text = (raw && raw.text) || '';
       const lines = text.split(/\r?\n/);
@@ -272,28 +274,29 @@ const ADAPTERS = {
         }
         return out;
       }
-      const iDate = header.indexOf('date/time'), iId = header.indexOf('trans. id'),
-            iType = header.indexOf('transaction type'), iTotal = header.indexOf('transaction total');
-      if (iDate < 0 || iId < 0 || iType < 0) return [];
-      const completed = new Set(this._completed);
-      const seen = new Set(); const perDay = {};
-      for (let i = 1; i < lines.length; i++) {
+      const TEND = new Set(this._tenders);
+      const tx = new Map();
+      for (let i = 0; i < lines.length; i++) {
         const ln = lines[i]; if (!ln) continue;
-        const c = this._splitCSV(ln);
-        const id = c[iId]; if (!id || seen.has(id)) continue; seen.add(id);
-        const type = (c[iType] || '').trim().toUpperCase();
-        if (!completed.has(type)) continue;
-        let tot = parseFloat(String(c[iTotal] || '0').replace(/,/g, '')); if (!isFinite(tot)) tot = 0;
-        if (tot < 0) continue;
-        const d = this._iso(c[iDate]); if (!d) continue;
-        perDay[d] = (perDay[d] || 0) + 1;
+        const c = this._splitCSV(ln); if (c.length < 16) continue;
+        const d = this._iso(c[6]); if (!d) continue;
+        const key = d + '|' + c[8];
+        let g = tx.get(key); if (!g) { g = { d: d, descs: [] }; tx.set(key, g); }
+        g.descs.push((c[13] || '').trim().toUpperCase());
       }
-      return Object.keys(perDay).map((d) => ({ date: d, count: perDay[d] }));
+      const per = {};
+      for (const g of tx.values()) {
+        const U = g.descs;
+        if (U.some((x) => x.indexOf('VOID ENTIRE SALE') >= 0) || U.some((x) => x.indexOf('*REFUND*') >= 0)) continue;
+        const paid = U.some((x) => TEND.has(x) || x.indexOf('GIFT VOUCHER') === 0);
+        if (paid) per[g.d] = (per[g.d] || 0) + 1;
+      }
+      return Object.keys(per).map((d) => ({ date: d, count: per[d] }));
     },
 
     async status(env, h) {
       const ls = await h.lastSyncAt();
-      return { connected: !!ls, org: 'BePoz (report upload)', sandbox: false, lastSync: ls || null };
+      return { connected: !!ls, org: 'Idealpos (report upload)', sandbox: false, lastSync: ls || null };
     },
 
     async fetchRange(env, h, q) {
@@ -307,15 +310,6 @@ const ADAPTERS = {
     }
   },
 
-  /* >>> ADAPTER 3: ROSTERING (optional - only if the owner has one)
-     Contract:
-       status(env, h)        -> { connected, org, sandbox, lastSync }
-       fetchRange(env, h, q) -> { cost }    (rostered labour cost for the
-                                  period; powers the PROJECTED wage % only)
-     If this source is gated or absent, leave configured:false - the actual
-     Wage % from accounting already covers the board (fallback ladder).
-     Example (Deputy): pasted permanent token (secret ROSTERING_API_TOKEN).
-  */
   rostering: {
     configured: true,
     auth: 'token',
