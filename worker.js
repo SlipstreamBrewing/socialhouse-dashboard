@@ -270,7 +270,7 @@ const ADAPTERS = {
           const c = this._splitCSV(ln);
           for (let i = 0; i < c.length; i++) {
             const v = (c[i] || '').trim();
-            if (!month) { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})\D+to/i.exec(v); if (m) month = m[3] + '-' + m[2].padStart(2, '0'); }
+            if (!month && /\bto\b/i.test(v)) { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(v); if (m) month = m[3] + '-' + m[2].padStart(2, '0'); }
             if (sales === null && v.toLowerCase() === 'sales') { const n = parseInt(String(c[i + 1] || '').replace(/[^0-9]/g, ''), 10); if (isFinite(n)) sales = n; }
           }
         }
