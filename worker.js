@@ -262,6 +262,20 @@ const ADAPTERS = {
       const text = (raw && raw.text) || '';
       const lines = text.split(/\r?\n/);
       if (lines.length < 2) return [];
+      /* Idealpos Financial Report: one monthly figure ('Sales'), stored on the
+         month's first day. This is Idealpos's own completed-sales count. */
+      if (text.toLowerCase().indexOf('financial report') >= 0) {
+        let month = null, sales = null;
+        for (const ln of lines) {
+          const c = this._splitCSV(ln);
+          for (let i = 0; i < c.length; i++) {
+            const v = (c[i] || '').trim();
+            if (!month) { const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})\D+to/i.exec(v); if (m) month = m[3] + '-' + m[2].padStart(2, '0'); }
+            if (sales === null && v.toLowerCase() === 'sales') { const n = parseInt(String(c[i + 1] || '').replace(/[^0-9]/g, ''), 10); if (isFinite(n)) sales = n; }
+          }
+        }
+        return (month && sales !== null) ? [{ date: month + '-01', count: sales }] : [];
+      }
       const header = this._splitCSV(lines[0]).map((x) => x.trim().toLowerCase());
       const di = header.indexOf('date'), ci = header.indexOf('count');
       if (di >= 0 && ci >= 0) {
